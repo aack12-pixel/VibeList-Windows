@@ -12,8 +12,9 @@ $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceScript = Join-Path $projectDir "VibeList.ps1"
 $launcherSource = Join-Path $projectDir "VibeList.Launcher.cs"
 $iconFile = Join-Path $projectDir "VibeList.ico"
-$fontFile = Join-Path $projectDir "NotoSansKR-VF.ttf"
-$fontLicenseFile = Join-Path $projectDir "OFL-NotoSansKR.txt"
+$regularFontFile = Join-Path $projectDir "Pretendard-Regular.otf"
+$mediumFontFile = Join-Path $projectDir "Pretendard-Medium.otf"
+$fontLicenseFile = Join-Path $projectDir "OFL-Pretendard.txt"
 $outputExe = Join-Path $projectDir "VibeList.exe"
 $hashFile = Join-Path $projectDir "VibeList.exe.sha256"
 $scriptHashFile = Join-Path $projectDir "VibeList.ps1.sha256"
@@ -21,7 +22,7 @@ $zipFile = Join-Path $projectDir "VibeList-Windows-portable.zip"
 $releaseDir = Join-Path $projectDir "release\VibeList"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
-foreach ($required in @($sourceScript, $launcherSource, $iconFile, $fontFile, $fontLicenseFile, $compiler)) {
+foreach ($required in @($sourceScript, $launcherSource, $iconFile, $regularFontFile, $mediumFontFile, $fontLicenseFile, $compiler)) {
     if (-not (Test-Path -LiteralPath $required)) { throw "필수 파일을 찾을 수 없습니다: $required" }
 }
 
@@ -41,7 +42,8 @@ try {
         "/out:$outputExe", "/win32icon:$iconFile",
         "/reference:System.dll", "/reference:System.Core.dll", "/reference:System.Windows.Forms.dll",
         "/resource:$embeddedScript,VibeList.ps1", "/resource:$iconFile,VibeList.ico",
-        "/resource:$fontFile,NotoSansKR-VF.ttf", $launcherSource
+        "/resource:$regularFontFile,Pretendard-Regular.otf",
+        "/resource:$mediumFontFile,Pretendard-Medium.otf", $launcherSource
     )
     & $compiler $compilerArgs
     if ($LASTEXITCODE -ne 0) { throw "EXE 빌드에 실패했습니다: $LASTEXITCODE" }
@@ -51,13 +53,21 @@ try {
     $scriptHash = (Get-FileHash -LiteralPath $sourceScript -Algorithm SHA256).Hash.ToLowerInvariant()
     "$scriptHash  VibeList.ps1" | Set-Content -LiteralPath $scriptHashFile -Encoding ASCII
 
+    if (Test-Path -LiteralPath $releaseDir) {
+        $resolvedReleaseDir = (Resolve-Path -LiteralPath $releaseDir).Path
+        if (-not $resolvedReleaseDir.StartsWith($projectDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "배포 폴더 위치가 안전하지 않습니다: $resolvedReleaseDir"
+        }
+        Remove-Item -LiteralPath $resolvedReleaseDir -Recurse -Force
+    }
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     Copy-Item -LiteralPath $outputExe -Destination (Join-Path $releaseDir "VibeList.exe") -Force
     Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $releaseDir "VibeList.ps1") -Force
     Copy-Item -LiteralPath (Join-Path $projectDir "VibeList.cmd") -Destination (Join-Path $releaseDir "VibeList.cmd") -Force
     Copy-Item -LiteralPath $iconFile -Destination (Join-Path $releaseDir "VibeList.ico") -Force
-    Copy-Item -LiteralPath $fontFile -Destination (Join-Path $releaseDir "NotoSansKR-VF.ttf") -Force
-    Copy-Item -LiteralPath $fontLicenseFile -Destination (Join-Path $releaseDir "OFL-NotoSansKR.txt") -Force
+    Copy-Item -LiteralPath $regularFontFile -Destination (Join-Path $releaseDir "Pretendard-Regular.otf") -Force
+    Copy-Item -LiteralPath $mediumFontFile -Destination (Join-Path $releaseDir "Pretendard-Medium.otf") -Force
+    Copy-Item -LiteralPath $fontLicenseFile -Destination (Join-Path $releaseDir "OFL-Pretendard.txt") -Force
     Copy-Item -LiteralPath (Join-Path $projectDir "사용방법.txt") -Destination (Join-Path $releaseDir "사용방법.txt") -Force
     Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipFile -Force
 

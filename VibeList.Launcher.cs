@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("A cozy todo checklist for Windows")]
 [assembly: AssemblyCompany("Shin Daehun")]
 [assembly: AssemblyProduct("Vibe List")]
-[assembly: AssemblyVersion("1.2.2.0")]
-[assembly: AssemblyFileVersion("1.2.2.0")]
+[assembly: AssemblyVersion("1.2.3.0")]
+[assembly: AssemblyFileVersion("1.2.3.0")]
 
 internal static class VibeListLauncher
 {
@@ -21,7 +21,8 @@ internal static class VibeListLauncher
         string runtimeDirectory = Path.Combine(appData, "VibeList");
         string scriptPath = Path.Combine(runtimeDirectory, "VibeList.runtime.ps1");
         string iconPath = Path.Combine(runtimeDirectory, "VibeList.ico");
-        string fontPath = Path.Combine(runtimeDirectory, "NotoSansKR-VF.ttf");
+        string regularFontPath = Path.Combine(runtimeDirectory, "Pretendard-Regular.otf");
+        string mediumFontPath = Path.Combine(runtimeDirectory, "Pretendard-Medium.otf");
         string errorLogPath = Path.Combine(runtimeDirectory, "error.log");
 
         try
@@ -29,7 +30,8 @@ internal static class VibeListLauncher
             Directory.CreateDirectory(runtimeDirectory);
             WriteResourceToFile("VibeList.ps1", scriptPath);
             WriteResourceToFile("VibeList.ico", iconPath);
-            WriteResourceToFile("NotoSansKR-VF.ttf", fontPath);
+            WriteResourceToFile("Pretendard-Regular.otf", regularFontPath);
+            WriteResourceToFile("Pretendard-Medium.otf", mediumFontPath);
 
             StringBuilder arguments = new StringBuilder();
             arguments.Append("-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ");
@@ -59,7 +61,7 @@ internal static class VibeListLauncher
             startInfo.WindowStyle = ProcessWindowStyle.Hidden;
             startInfo.RedirectStandardError = true;
             startInfo.EnvironmentVariables["VIBELIST_ICON_PATH"] = iconPath;
-            startInfo.EnvironmentVariables["VIBELIST_FONT_PATH"] = fontPath;
+            startInfo.EnvironmentVariables["VIBELIST_FONT_DIR"] = runtimeDirectory;
             startInfo.EnvironmentVariables["VIBELIST_EXE_PATH"] = Assembly.GetExecutingAssembly().Location;
             startInfo.EnvironmentVariables["VIBELIST_LAUNCHER_PID"] = Process.GetCurrentProcess().Id.ToString();
 

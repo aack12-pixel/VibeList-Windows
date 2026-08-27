@@ -11,10 +11,36 @@ if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
 }
 
 $ErrorActionPreference = "Stop"
-$script:appVersion = [Version]"1.2.2"
+$script:appVersion = [Version]"1.2.3"
 $script:updateApiUrl = [Environment]::GetEnvironmentVariable("VIBELIST_UPDATE_API")
 if ([string]::IsNullOrWhiteSpace($script:updateApiUrl)) {
     $script:updateApiUrl = "https://api.github.com/repos/aack12-pixel/VibeList-Windows/releases/latest"
+}
+
+$script:todoFontDirectory = [Environment]::GetEnvironmentVariable("VIBELIST_FONT_DIR")
+if ([string]::IsNullOrWhiteSpace($script:todoFontDirectory)) { $script:todoFontDirectory = $PSScriptRoot }
+$script:todoFontFiles = @("Pretendard-Regular.otf", "Pretendard-Medium.otf")
+
+if (@($script:todoFontFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $script:todoFontDirectory $_)) }).Count -gt 0) {
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $bootstrapHeaders = @{ "User-Agent" = "VibeList/$($script:appVersion)"; "Accept" = "application/vnd.github+json" }
+        $bootstrapRelease = Invoke-RestMethod -Uri $script:updateApiUrl -Headers $bootstrapHeaders -TimeoutSec 12 -UseBasicParsing
+        foreach ($fontName in $script:todoFontFiles) {
+            $fontDestination = Join-Path $script:todoFontDirectory $fontName
+            if (Test-Path -LiteralPath $fontDestination) { continue }
+            $fontAsset = @($bootstrapRelease.assets | Where-Object name -eq $fontName | Select-Object -First 1)
+            if (-not $fontAsset) { continue }
+            $bootstrapClient = New-Object Net.WebClient
+            $bootstrapClient.Headers.Add("User-Agent", "VibeList/$($script:appVersion)")
+            try { $bootstrapClient.DownloadFile([string]$fontAsset.browser_download_url, $fontDestination) }
+            finally { $bootstrapClient.Dispose() }
+            if ([string]$fontAsset.digest -match "^sha256:([a-fA-F0-9]{64})$" -and
+                (Get-FileHash -LiteralPath $fontDestination -Algorithm SHA256).Hash -ne $Matches[1]) {
+                Remove-Item -LiteralPath $fontDestination -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } catch { }
 }
 
 Add-Type -AssemblyName PresentationFramework
@@ -86,7 +112,8 @@ public class VibeTodo : INotifyPropertyChanged
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource PrimaryText}"
         FontFamily="{DynamicResource AppFont}" TextOptions.TextFormattingMode="Display">
     <Window.Resources>
-        <FontFamily x:Key="AppFont">Noto Sans KR</FontFamily>
+        <FontFamily x:Key="AppFont">Segoe UI Variable Text, Malgun Gothic</FontFamily>
+        <FontFamily x:Key="TodoFont">Pretendard, Malgun Gothic</FontFamily>
         <SolidColorBrush x:Key="WindowBg" Color="#15101B"/>
         <SolidColorBrush x:Key="PrimaryText" Color="#FFF8F4"/>
         <SolidColorBrush x:Key="Panel" Color="#241B2D"/>
@@ -211,7 +238,7 @@ public class VibeTodo : INotifyPropertyChanged
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="TodoInput" Grid.Column="0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryText}"
-                                 CaretBrush="{DynamicResource Coral}" FontFamily="{DynamicResource AppFont}" FontWeight="Medium"
+                                 CaretBrush="{DynamicResource Coral}" FontFamily="{DynamicResource TodoFont}" FontWeight="Medium"
                                  FontSize="14" Padding="9,9" VerticalContentAlignment="Center"
                                  ToolTip="할 일을 입력하고 Enter를 누르세요"/>
                         <Button x:Name="AddButton" Grid.Column="1" Content="+  추가" Background="{DynamicResource Coral}" Foreground="{DynamicResource ButtonTextDark}"
@@ -262,7 +289,7 @@ public class VibeTodo : INotifyPropertyChanged
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/><ColumnDefinition Width="30"/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
                                         <CheckBox Grid.Column="0" IsChecked="{Binding Done, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" Width="18" Height="18" Cursor="Hand"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontFamily="{DynamicResource AppFont}"
+                                        <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontFamily="{DynamicResource TodoFont}"
                                                    FontWeight="Medium" FontSize="14" TextWrapping="Wrap" Margin="7,0,8,0">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
@@ -302,15 +329,11 @@ public class VibeTodo : INotifyPropertyChanged
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
 
-$fontPath = [Environment]::GetEnvironmentVariable("VIBELIST_FONT_PATH")
-if ([string]::IsNullOrWhiteSpace($fontPath)) {
-    $fontPath = Join-Path $PSScriptRoot "NotoSansKR-VF.ttf"
-}
-if (Test-Path -LiteralPath $fontPath) {
+if (@($script:todoFontFiles | Where-Object { Test-Path -LiteralPath (Join-Path $script:todoFontDirectory $_) }).Count -eq $script:todoFontFiles.Count) {
     try {
-        $fontDirectory = (Split-Path -Parent $fontPath).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+        $fontDirectory = $script:todoFontDirectory.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
         $fontDirectoryUri = New-Object System.Uri($fontDirectory, [System.UriKind]::Absolute)
-        $window.Resources["AppFont"] = [Windows.Media.FontFamily]::new($fontDirectoryUri, "./#Noto Sans KR")
+        $window.Resources["TodoFont"] = [Windows.Media.FontFamily]::new($fontDirectoryUri, "./#Pretendard")
     } catch { }
 }
 
@@ -553,9 +576,10 @@ function Install-Release($release, [Version]$releaseVersion) {
     }
 
     if ($launchMode -eq "Script") {
-        $fontAsset = @($release.assets | Where-Object name -eq "NotoSansKR-VF.ttf" | Select-Object -First 1)
-        if ($fontAsset) {
-            $fontDestination = Join-Path (Split-Path -Parent $currentFile) "NotoSansKR-VF.ttf"
+        foreach ($fontName in @("Pretendard-Regular.otf", "Pretendard-Medium.otf")) {
+            $fontAsset = @($release.assets | Where-Object name -eq $fontName | Select-Object -First 1)
+            if (-not $fontAsset) { continue }
+            $fontDestination = Join-Path (Split-Path -Parent $currentFile) $fontName
             $fontClient = New-Object Net.WebClient
             $fontClient.Headers.Add("User-Agent", "VibeList/$($script:appVersion)")
             try {
