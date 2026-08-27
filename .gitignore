@@ -1,5 +1,8 @@
 release/
 .qa-*.png
 VibeList-Windows-fixed.zip
+VibeList-Windows-portable.zip
 VibeList.exe.sha256
+VibeList.ps1.sha256
+VibeList 실행.lnk
 *.new.exe

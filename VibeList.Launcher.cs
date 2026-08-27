@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("A cozy todo checklist for Windows")]
 [assembly: AssemblyCompany("Shin Daehun")]
 [assembly: AssemblyProduct("Vibe List")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.2.1.0")]
+[assembly: AssemblyFileVersion("1.2.1.0")]
 
 internal static class VibeListLauncher
 {

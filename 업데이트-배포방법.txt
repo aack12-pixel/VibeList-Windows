@@ -3,16 +3,17 @@ VIBE LIST — 업데이트 배포 방법
 처음 한 번
 1. GitHub에 공개 저장소 VibeList-Windows를 만듭니다.
 2. 앱의 GitHub 업데이트 주소를 해당 저장소로 연결해 빌드합니다.
-3. v1.2.0 릴리스에 VibeList.exe와 VibeList.exe.sha256을 올립니다.
+3. 릴리스에 EXE와 PowerShell용 파일 및 SHA-256 파일을 올립니다.
 
 다음 업데이트부터
 1. 앱 버전을 올리고 VibeList.exe를 다시 빌드합니다.
 2. 새 버전 태그(예: v1.3.0)로 GitHub Release를 만듭니다.
-3. VibeList.exe와 VibeList.exe.sha256을 릴리스 자산으로 올립니다.
+3. VibeList.exe, VibeList.exe.sha256, VibeList.ps1, VibeList.ps1.sha256을 릴리스 자산으로 올립니다.
 4. 사용자 앱은 하루 한 번 새 버전을 확인하고 업데이트 여부를 묻습니다.
 
 중요
 - GitHub Release 자산 이름은 반드시 VibeList.exe여야 합니다.
 - SHA-256 파일 이름은 반드시 VibeList.exe.sha256이어야 합니다.
+- 관리형 Windows용 파일 이름은 반드시 VibeList.ps1과 VibeList.ps1.sha256이어야 합니다.
 - 업데이트는 %LOCALAPPDATA%\VibeList\todos.json을 교체하지 않습니다.
 - 자동 업데이트 기능이 없는 v1.1 이하 사용자는 v1.2 이상을 한 번 직접 받아야 합니다.

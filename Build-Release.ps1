@@ -14,7 +14,8 @@ $launcherSource = Join-Path $projectDir "VibeList.Launcher.cs"
 $iconFile = Join-Path $projectDir "VibeList.ico"
 $outputExe = Join-Path $projectDir "VibeList.exe"
 $hashFile = Join-Path $projectDir "VibeList.exe.sha256"
-$zipFile = Join-Path $projectDir "VibeList-Windows-fixed.zip"
+$scriptHashFile = Join-Path $projectDir "VibeList.ps1.sha256"
+$zipFile = Join-Path $projectDir "VibeList-Windows-portable.zip"
 $releaseDir = Join-Path $projectDir "release\VibeList"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
@@ -29,8 +30,8 @@ $embeddedScript = Join-Path $temporaryDir "VibeList.ps1"
 try {
     New-Item -ItemType Directory -Path $temporaryDir | Out-Null
     $scriptText = Get-Content -LiteralPath $sourceScript -Raw -Encoding UTF8
-    if ($scriptText -notmatch "__UPDATE_API_URL__") { throw "업데이트 주소 자리표시자를 찾을 수 없습니다." }
     $scriptText = $scriptText.Replace("__UPDATE_API_URL__", $apiUrl)
+    $scriptText = [regex]::Replace($scriptText, 'https://api\.github\.com/repos/[^/\"'']+/[^/\"'']+/releases/latest', $apiUrl)
     [IO.File]::WriteAllText($embeddedScript, $scriptText, [Text.UTF8Encoding]::new($true))
 
     $compilerArgs = @(
@@ -44,15 +45,21 @@ try {
 
     $hash = (Get-FileHash -LiteralPath $outputExe -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  VibeList.exe" | Set-Content -LiteralPath $hashFile -Encoding ASCII
+    $scriptHash = (Get-FileHash -LiteralPath $sourceScript -Algorithm SHA256).Hash.ToLowerInvariant()
+    "$scriptHash  VibeList.ps1" | Set-Content -LiteralPath $scriptHashFile -Encoding ASCII
 
     New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
     Copy-Item -LiteralPath $outputExe -Destination (Join-Path $releaseDir "VibeList.exe") -Force
+    Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $releaseDir "VibeList.ps1") -Force
+    Copy-Item -LiteralPath (Join-Path $projectDir "VibeList.cmd") -Destination (Join-Path $releaseDir "VibeList.cmd") -Force
+    Copy-Item -LiteralPath $iconFile -Destination (Join-Path $releaseDir "VibeList.ico") -Force
     Copy-Item -LiteralPath (Join-Path $projectDir "사용방법.txt") -Destination (Join-Path $releaseDir "사용방법.txt") -Force
     Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipFile -Force
 
     Write-Output "GitHub API: $apiUrl"
     Write-Output "EXE: $outputExe"
     Write-Output "SHA256: $hashFile"
+    Write-Output "SCRIPT SHA256: $scriptHashFile"
     Write-Output "ZIP: $zipFile"
 } finally {
     if (Test-Path -LiteralPath $temporaryDir) {

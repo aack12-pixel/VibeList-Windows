@@ -11,12 +11,11 @@ if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
 }
 
 $ErrorActionPreference = "Stop"
-$script:appVersion = [Version]"1.2.0"
+$script:appVersion = [Version]"1.2.1"
 $script:updateApiUrl = [Environment]::GetEnvironmentVariable("VIBELIST_UPDATE_API")
 if ([string]::IsNullOrWhiteSpace($script:updateApiUrl)) {
-    $script:updateApiUrl = "__UPDATE_API_URL__"
+    $script:updateApiUrl = "https://api.github.com/repos/aack12-pixel/VibeList-Windows/releases/latest"
 }
-$script:updateAssetName = "VibeList.exe"
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -478,18 +477,29 @@ function Get-ReleaseVersion($release) {
 }
 
 function Install-Release($release, [Version]$releaseVersion) {
-    $asset = @($release.assets | Where-Object name -eq $script:updateAssetName | Select-Object -First 1)
-    if (-not $asset) { throw "릴리스에 $($script:updateAssetName) 파일이 없습니다." }
-
     $currentExe = [Environment]::GetEnvironmentVariable("VIBELIST_EXE_PATH")
     $launcherPidText = [Environment]::GetEnvironmentVariable("VIBELIST_LAUNCHER_PID")
-    if ([string]::IsNullOrWhiteSpace($currentExe) -or -not (Test-Path -LiteralPath $currentExe)) {
-        throw "현재 실행 파일 위치를 확인할 수 없습니다."
+    $isExeMode = (-not [string]::IsNullOrWhiteSpace($currentExe)) -and (Test-Path -LiteralPath $currentExe)
+
+    if ($isExeMode) {
+        $assetName = "VibeList.exe"
+        $currentFile = $currentExe
+        $downloadFileName = "VibeList-$releaseVersion.exe"
+        $launchMode = "Exe"
+    } else {
+        $assetName = "VibeList.ps1"
+        $currentFile = $PSCommandPath
+        $downloadFileName = "VibeList-$releaseVersion.ps1"
+        $launchMode = "Script"
+        $launcherPidText = $PID.ToString()
     }
+
+    $asset = @($release.assets | Where-Object name -eq $assetName | Select-Object -First 1)
+    if (-not $asset) { throw "릴리스에 $assetName 파일이 없습니다." }
 
     $updateDir = Join-Path $dataDir "updates"
     if (-not (Test-Path -LiteralPath $updateDir)) { New-Item -ItemType Directory -Path $updateDir -Force | Out-Null }
-    $downloadPath = Join-Path $updateDir "VibeList-$releaseVersion.exe"
+    $downloadPath = Join-Path $updateDir $downloadFileName
 
     $statusText.Text = "업데이트 다운로드 중..."
     $client = New-Object Net.WebClient
@@ -504,7 +514,7 @@ function Install-Release($release, [Version]$releaseVersion) {
     if ([string]$asset.digest -match "^sha256:([a-fA-F0-9]{64})$") {
         $expectedHash = $Matches[1]
     } else {
-        $hashAssetName = "$($script:updateAssetName).sha256"
+        $hashAssetName = "$assetName.sha256"
         $hashAsset = @($release.assets | Where-Object name -eq $hashAssetName | Select-Object -First 1)
         if ($hashAsset) {
             $hashClient = New-Object Net.WebClient
@@ -530,21 +540,26 @@ function Install-Release($release, [Version]$releaseVersion) {
 
     $applyScript = Join-Path $updateDir "apply-update.ps1"
     @'
-param([string]$CurrentExe, [string]$NewExe, [int]$WaitForPid, [string]$ErrorLog)
+param([string]$CurrentFile, [string]$NewFile, [string]$LaunchMode, [int]$WaitForPid, [string]$ErrorLog)
 $ErrorActionPreference = "Stop"
 try {
     if ($WaitForPid -gt 0) { Wait-Process -Id $WaitForPid -ErrorAction SilentlyContinue }
     $copied = $false
     for ($attempt = 0; $attempt -lt 20 -and -not $copied; $attempt++) {
         try {
-            Copy-Item -LiteralPath $NewExe -Destination $CurrentExe -Force
+            Copy-Item -LiteralPath $NewFile -Destination $CurrentFile -Force
             $copied = $true
         } catch {
             Start-Sleep -Milliseconds 250
         }
     }
-    if (-not $copied) { throw "실행 파일을 교체할 수 없습니다." }
-    Start-Process -FilePath $CurrentExe
+    if (-not $copied) { throw "업데이트 파일을 교체할 수 없습니다." }
+    if ($LaunchMode -eq "Script") {
+        $args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$CurrentFile`""
+        Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden
+    } else {
+        Start-Process -FilePath $CurrentFile
+    }
 } catch {
     $_ | Out-String | Set-Content -LiteralPath $ErrorLog -Encoding UTF8
 }
@@ -553,7 +568,7 @@ try {
     $launcherPid = 0
     [void][int]::TryParse($launcherPidText, [ref]$launcherPid)
     $errorLog = Join-Path $dataDir "update-error.log"
-    $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$applyScript`" -CurrentExe `"$currentExe`" -NewExe `"$downloadPath`" -WaitForPid $launcherPid -ErrorLog `"$errorLog`""
+    $arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$applyScript`" -CurrentFile `"$currentFile`" -NewFile `"$downloadPath`" -LaunchMode $launchMode -WaitForPid $launcherPid -ErrorLog `"$errorLog`""
     Start-Process -FilePath "powershell.exe" -ArgumentList $arguments -WindowStyle Hidden
     $window.Close()
 }
