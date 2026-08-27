@@ -19,7 +19,7 @@ if ([string]::IsNullOrWhiteSpace($script:updateApiUrl)) {
 
 $script:todoFontDirectory = [Environment]::GetEnvironmentVariable("VIBELIST_FONT_DIR")
 if ([string]::IsNullOrWhiteSpace($script:todoFontDirectory)) { $script:todoFontDirectory = $PSScriptRoot }
-$script:todoFontFiles = @("Pretendard-Regular.otf", "Pretendard-Medium.otf")
+$script:todoFontFiles = @("NanumGothic-Regular.ttf")
 
 if (@($script:todoFontFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $script:todoFontDirectory $_)) }).Count -gt 0) {
     try {
@@ -110,10 +110,10 @@ public class VibeTodo : INotifyPropertyChanged
         Title="Vibe List" Width="460" Height="720" MinWidth="360" MinHeight="500"
         WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResizeWithGrip" ShowInTaskbar="True"
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource PrimaryText}"
-        FontFamily="{DynamicResource AppFont}" TextOptions.TextFormattingMode="Display">
+        FontFamily="{DynamicResource AppFont}" TextOptions.TextFormattingMode="Ideal">
     <Window.Resources>
         <FontFamily x:Key="AppFont">Segoe UI Variable Text, Malgun Gothic</FontFamily>
-        <FontFamily x:Key="TodoFont">Pretendard, Malgun Gothic</FontFamily>
+        <FontFamily x:Key="TodoFont">NanumGothic, Malgun Gothic</FontFamily>
         <SolidColorBrush x:Key="WindowBg" Color="#15101B"/>
         <SolidColorBrush x:Key="PrimaryText" Color="#FFF8F4"/>
         <SolidColorBrush x:Key="Panel" Color="#241B2D"/>
@@ -238,8 +238,8 @@ public class VibeTodo : INotifyPropertyChanged
                     <Grid>
                         <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="82"/></Grid.ColumnDefinitions>
                         <TextBox x:Name="TodoInput" Grid.Column="0" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource PrimaryText}"
-                                 CaretBrush="{DynamicResource Coral}" FontFamily="{DynamicResource TodoFont}" FontWeight="Medium"
-                                 FontSize="14" Padding="9,9" VerticalContentAlignment="Center"
+                                 CaretBrush="{DynamicResource Coral}" FontFamily="{DynamicResource TodoFont}" FontWeight="Normal"
+                                 FontSize="15" Padding="9,9" VerticalContentAlignment="Center"
                                  ToolTip="할 일을 입력하고 Enter를 누르세요"/>
                         <Button x:Name="AddButton" Grid.Column="1" Content="+  추가" Background="{DynamicResource Coral}" Foreground="{DynamicResource ButtonTextDark}"
                                 FontWeight="Bold" FontSize="13" Margin="5,0,0,0">
@@ -290,7 +290,7 @@ public class VibeTodo : INotifyPropertyChanged
                                         <CheckBox Grid.Column="0" IsChecked="{Binding Done, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                   VerticalAlignment="Center" HorizontalAlignment="Center" Width="18" Height="18" Cursor="Hand"/>
                                         <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontFamily="{DynamicResource TodoFont}"
-                                                   FontWeight="Medium" FontSize="14" TextWrapping="Wrap" Margin="7,0,8,0">
+                                                   FontWeight="Normal" FontSize="15" TextWrapping="Wrap" Margin="7,0,8,0">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
                                                     <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
@@ -333,7 +333,7 @@ if (@($script:todoFontFiles | Where-Object { Test-Path -LiteralPath (Join-Path $
     try {
         $fontDirectory = $script:todoFontDirectory.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
         $fontDirectoryUri = New-Object System.Uri($fontDirectory, [System.UriKind]::Absolute)
-        $window.Resources["TodoFont"] = [Windows.Media.FontFamily]::new($fontDirectoryUri, "./#Pretendard")
+        $window.Resources["TodoFont"] = [Windows.Media.FontFamily]::new($fontDirectoryUri, "./#NanumGothic")
     } catch { }
 }
 
@@ -576,7 +576,7 @@ function Install-Release($release, [Version]$releaseVersion) {
     }
 
     if ($launchMode -eq "Script") {
-        foreach ($fontName in @("Pretendard-Regular.otf", "Pretendard-Medium.otf")) {
+        foreach ($fontName in @("NanumGothic-Regular.ttf")) {
             $fontAsset = @($release.assets | Where-Object name -eq $fontName | Select-Object -First 1)
             if (-not $fontAsset) { continue }
             $fontDestination = Join-Path (Split-Path -Parent $currentFile) $fontName

@@ -21,8 +21,7 @@ internal static class VibeListLauncher
         string runtimeDirectory = Path.Combine(appData, "VibeList");
         string scriptPath = Path.Combine(runtimeDirectory, "VibeList.runtime.ps1");
         string iconPath = Path.Combine(runtimeDirectory, "VibeList.ico");
-        string regularFontPath = Path.Combine(runtimeDirectory, "Pretendard-Regular.otf");
-        string mediumFontPath = Path.Combine(runtimeDirectory, "Pretendard-Medium.otf");
+        string todoFontPath = Path.Combine(runtimeDirectory, "NanumGothic-Regular.ttf");
         string errorLogPath = Path.Combine(runtimeDirectory, "error.log");
 
         try
@@ -30,8 +29,7 @@ internal static class VibeListLauncher
             Directory.CreateDirectory(runtimeDirectory);
             WriteResourceToFile("VibeList.ps1", scriptPath);
             WriteResourceToFile("VibeList.ico", iconPath);
-            WriteResourceToFile("Pretendard-Regular.otf", regularFontPath);
-            WriteResourceToFile("Pretendard-Medium.otf", mediumFontPath);
+            WriteResourceToFile("NanumGothic-Regular.ttf", todoFontPath);
 
             StringBuilder arguments = new StringBuilder();
             arguments.Append("-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ");
