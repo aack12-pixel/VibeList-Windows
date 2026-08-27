@@ -1,0 +1,5 @@
+release/
+.qa-*.png
+VibeList-Windows-fixed.zip
+VibeList.exe.sha256
+*.new.exe
