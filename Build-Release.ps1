@@ -11,6 +11,8 @@ $ErrorActionPreference = "Stop"
 $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $sourceScript = Join-Path $projectDir "VibeList.ps1"
 $launcherSource = Join-Path $projectDir "VibeList.Launcher.cs"
+$windowlessLauncher = Join-Path $projectDir "VibeList.vbs"
+$scriptInstaller = Join-Path $projectDir "VibeList Install.vbs"
 $iconFile = Join-Path $projectDir "VibeList.ico"
 $todoFontFile = Join-Path $projectDir "NanumGothic-Regular.ttf"
 $fontLicenseFile = Join-Path $projectDir "OFL-NanumGothic.txt"
@@ -18,10 +20,13 @@ $outputExe = Join-Path $projectDir "VibeList.exe"
 $hashFile = Join-Path $projectDir "VibeList.exe.sha256"
 $scriptHashFile = Join-Path $projectDir "VibeList.ps1.sha256"
 $zipFile = Join-Path $projectDir "VibeList-Windows-portable.zip"
+$scriptInstallerZip = Join-Path $projectDir "VibeList-설치파일.zip"
 $releaseDir = Join-Path $projectDir "release\VibeList"
+$scriptPackageRoot = Join-Path $projectDir "release\script-package"
+$scriptPayloadDir = Join-Path $scriptPackageRoot "VibeList"
 $compiler = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
-foreach ($required in @($sourceScript, $launcherSource, $iconFile, $todoFontFile, $fontLicenseFile, $compiler)) {
+foreach ($required in @($sourceScript, $launcherSource, $windowlessLauncher, $scriptInstaller, $iconFile, $todoFontFile, $fontLicenseFile, $compiler)) {
     if (-not (Test-Path -LiteralPath $required)) { throw "필수 파일을 찾을 수 없습니다: $required" }
 }
 
@@ -62,17 +67,36 @@ try {
     Copy-Item -LiteralPath $outputExe -Destination (Join-Path $releaseDir "VibeList.exe") -Force
     Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $releaseDir "VibeList.ps1") -Force
     Copy-Item -LiteralPath (Join-Path $projectDir "VibeList.cmd") -Destination (Join-Path $releaseDir "VibeList.cmd") -Force
+    Copy-Item -LiteralPath $windowlessLauncher -Destination (Join-Path $releaseDir "VibeList.vbs") -Force
     Copy-Item -LiteralPath $iconFile -Destination (Join-Path $releaseDir "VibeList.ico") -Force
     Copy-Item -LiteralPath $todoFontFile -Destination (Join-Path $releaseDir "NanumGothic-Regular.ttf") -Force
     Copy-Item -LiteralPath $fontLicenseFile -Destination (Join-Path $releaseDir "OFL-NanumGothic.txt") -Force
     Copy-Item -LiteralPath (Join-Path $projectDir "사용방법.txt") -Destination (Join-Path $releaseDir "사용방법.txt") -Force
     Compress-Archive -LiteralPath $releaseDir -DestinationPath $zipFile -Force
 
+    if (Test-Path -LiteralPath $scriptPackageRoot) {
+        $resolvedScriptPackageRoot = (Resolve-Path -LiteralPath $scriptPackageRoot).Path
+        if (-not $resolvedScriptPackageRoot.StartsWith($projectDir + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "스크립트 배포 폴더 위치가 안전하지 않습니다: $resolvedScriptPackageRoot"
+        }
+        Remove-Item -LiteralPath $resolvedScriptPackageRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $scriptPayloadDir -Force | Out-Null
+    Copy-Item -LiteralPath $scriptInstaller -Destination (Join-Path $scriptPackageRoot "VibeList 설치.vbs") -Force
+    Copy-Item -LiteralPath $sourceScript -Destination (Join-Path $scriptPayloadDir "VibeList.ps1") -Force
+    Copy-Item -LiteralPath $windowlessLauncher -Destination (Join-Path $scriptPayloadDir "VibeList.vbs") -Force
+    Copy-Item -LiteralPath $iconFile -Destination (Join-Path $scriptPayloadDir "VibeList.ico") -Force
+    Copy-Item -LiteralPath $todoFontFile -Destination (Join-Path $scriptPayloadDir "NanumGothic-Regular.ttf") -Force
+    Copy-Item -LiteralPath $fontLicenseFile -Destination (Join-Path $scriptPayloadDir "OFL-NanumGothic.txt") -Force
+    Copy-Item -LiteralPath (Join-Path $projectDir "사용방법.txt") -Destination (Join-Path $scriptPayloadDir "사용방법.txt") -Force
+    Compress-Archive -Path (Join-Path $scriptPackageRoot "*") -DestinationPath $scriptInstallerZip -Force
+
     Write-Output "GitHub API: $apiUrl"
     Write-Output "EXE: $outputExe"
     Write-Output "SHA256: $hashFile"
     Write-Output "SCRIPT SHA256: $scriptHashFile"
     Write-Output "ZIP: $zipFile"
+    Write-Output "SCRIPT INSTALLER ZIP: $scriptInstallerZip"
 } finally {
     if (Test-Path -LiteralPath $temporaryDir) {
         $resolvedTemp = (Resolve-Path -LiteralPath $temporaryDir).Path

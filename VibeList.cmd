@@ -1,4 +1,4 @@
 @echo off
 setlocal
-start "Vibe List" powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%~dp0VibeList.ps1"
+start "" wscript.exe "%~dp0VibeList.vbs"
 exit /b

@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("A cozy todo checklist for Windows")]
 [assembly: AssemblyCompany("Shin Daehun")]
 [assembly: AssemblyProduct("Vibe List")]
-[assembly: AssemblyVersion("1.2.3.0")]
-[assembly: AssemblyFileVersion("1.2.3.0")]
+[assembly: AssemblyVersion("1.2.5.0")]
+[assembly: AssemblyFileVersion("1.2.5.0")]
 
 internal static class VibeListLauncher
 {
@@ -32,7 +32,7 @@ internal static class VibeListLauncher
             WriteResourceToFile("NanumGothic-Regular.ttf", todoFontPath);
 
             StringBuilder arguments = new StringBuilder();
-            arguments.Append("-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File ");
+            arguments.Append("-NoProfile -ExecutionPolicy Bypass -STA -File ");
             arguments.Append(Quote(scriptPath));
 
             foreach (string argument in args)
@@ -56,7 +56,7 @@ internal static class VibeListLauncher
             startInfo.Arguments = arguments.ToString();
             startInfo.UseShellExecute = false;
             startInfo.CreateNoWindow = true;
-            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+            startInfo.WindowStyle = ProcessWindowStyle.Normal;
             startInfo.RedirectStandardError = true;
             startInfo.EnvironmentVariables["VIBELIST_ICON_PATH"] = iconPath;
             startInfo.EnvironmentVariables["VIBELIST_FONT_DIR"] = runtimeDirectory;

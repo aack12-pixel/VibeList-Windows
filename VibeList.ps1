@@ -11,10 +11,21 @@ if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
 }
 
 $ErrorActionPreference = "Stop"
-$script:appVersion = [Version]"1.2.3"
-$script:updateApiUrl = [Environment]::GetEnvironmentVariable("VIBELIST_UPDATE_API")
-if ([string]::IsNullOrWhiteSpace($script:updateApiUrl)) {
-    $script:updateApiUrl = "https://api.github.com/repos/aack12-pixel/VibeList-Windows/releases/latest"
+$script:startupTracePath = [Environment]::GetEnvironmentVariable("VIBELIST_TRACE_PATH")
+function Write-StartupTrace([string]$message) {
+    if ([string]::IsNullOrWhiteSpace($script:startupTracePath)) { return }
+    try { "$(Get-Date -Format o) $message" | Add-Content -LiteralPath $script:startupTracePath -Encoding UTF8 }
+    catch { }
+}
+Write-StartupTrace "start"
+$script:appVersion = [Version]"1.2.5"
+$defaultUpdateApiUrl = "https://api.github.com/repos/aack12-pixel/VibeList-Windows/releases/latest"
+$updateApiOverride = [Environment]::GetEnvironmentVariable("VIBELIST_UPDATE_API")
+$script:updateApiUrl = if (-not [string]::IsNullOrWhiteSpace($updateApiOverride) -and
+    $updateApiOverride.Trim() -match '^https://api\.github\.com/repos/[^/]+/[^/]+/releases/latest$') {
+    $updateApiOverride.Trim()
+} else {
+    $defaultUpdateApiUrl
 }
 
 $script:todoFontDirectory = [Environment]::GetEnvironmentVariable("VIBELIST_FONT_DIR")
@@ -42,6 +53,7 @@ if (@($script:todoFontFiles | Where-Object { -not (Test-Path -LiteralPath (Join-
         }
     } catch { }
 }
+Write-StartupTrace "font-ready"
 
 Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
@@ -54,9 +66,20 @@ public static class VibeListTaskbar
 {
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     public static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(System.IntPtr windowHandle, int command);
+
+    [DllImport("kernel32.dll")]
+    public static extern System.IntPtr GetConsoleWindow();
 }
 "@
 [void][VibeListTaskbar]::SetCurrentProcessExplicitAppUserModelID("VibeList.Desktop.1")
+$consoleHandle = [VibeListTaskbar]::GetConsoleWindow()
+if ($consoleHandle -ne [IntPtr]::Zero) {
+    [void][VibeListTaskbar]::ShowWindow($consoleHandle, 0)
+}
+Write-StartupTrace "assemblies-ready"
 
 Add-Type -TypeDefinition @"
 using System;
@@ -66,6 +89,8 @@ public class VibeTodo : INotifyPropertyChanged
 {
     private bool done;
     private string title;
+    private string bucket;
+    private int sortOrder;
     public string Id { get; set; }
     public string Title
     {
@@ -84,6 +109,32 @@ public class VibeTodo : INotifyPropertyChanged
         }
     }
     public long CreatedAt { get; set; }
+    public string Bucket
+    {
+        get { return bucket; }
+        set
+        {
+            if (bucket != value)
+            {
+                bucket = value;
+                PropertyChangedEventHandler handler = PropertyChanged;
+                if (handler != null) { handler(this, new PropertyChangedEventArgs("Bucket")); }
+            }
+        }
+    }
+    public int SortOrder
+    {
+        get { return sortOrder; }
+        set
+        {
+            if (sortOrder != value)
+            {
+                sortOrder = value;
+                PropertyChangedEventHandler handler = PropertyChanged;
+                if (handler != null) { handler(this, new PropertyChangedEventArgs("SortOrder")); }
+            }
+        }
+    }
     public bool Done
     {
         get { return done; }
@@ -183,6 +234,50 @@ public class VibeTodo : INotifyPropertyChanged
                 </Setter.Value>
             </Setter>
         </Style>
+        <Style x:Key="TodoListItemStyle" TargetType="ListBoxItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Margin" Value="0,0,0,8"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate></Setter.Value>
+            </Setter>
+        </Style>
+        <DataTemplate x:Key="TodoItemTemplate">
+            <Border x:Name="Row" Background="{DynamicResource RowBg}" CornerRadius="14" Padding="9,11">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="25"/>
+                        <ColumnDefinition Width="34"/>
+                        <ColumnDefinition/>
+                        <ColumnDefinition Width="30"/>
+                        <ColumnDefinition Width="30"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="DragHandle" Grid.Column="0" Text="⠿" Tag="{Binding Id}" Cursor="SizeAll"
+                               Foreground="{DynamicResource Subtle}" FontSize="17" FontWeight="Bold"
+                               VerticalAlignment="Center" HorizontalAlignment="Center" ToolTip="잡아서 순서 바꾸기"/>
+                    <CheckBox Grid.Column="1" IsChecked="{Binding Done, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                              VerticalAlignment="Center" HorizontalAlignment="Center" Width="18" Height="18" Cursor="Hand"/>
+                    <TextBlock Grid.Column="2" Text="{Binding Title}" VerticalAlignment="Center" FontFamily="{DynamicResource TodoFont}"
+                               FontWeight="Normal" FontSize="15" TextWrapping="Wrap" Margin="7,0,8,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Done}" Value="True">
+                                        <Setter Property="Foreground" Value="{DynamicResource Completed}"/>
+                                        <Setter Property="TextDecorations" Value="Strikethrough"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                    <Button x:Name="EditTodoButton" Grid.Column="3" Content="✎" Tag="{Binding Id}" FontSize="15" Foreground="{DynamicResource Lilac}" ToolTip="수정"/>
+                    <Button x:Name="DeleteTodoButton" Grid.Column="4" Content="×" Tag="{Binding Id}" FontSize="17" Foreground="{DynamicResource Muted}" ToolTip="삭제"/>
+                </Grid>
+            </Border>
+        </DataTemplate>
     </Window.Resources>
 
     <Border x:Name="AppRoot" Background="{DynamicResource WindowBg}" BorderBrush="{DynamicResource WindowBorder}" BorderThickness="1" CornerRadius="12">
@@ -193,14 +288,24 @@ public class VibeTodo : INotifyPropertyChanged
             </Grid.RowDefinitions>
 
             <Grid x:Name="TitleBar" Grid.Row="0" Background="Transparent">
-                <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="18,0,0,0">
                     <Image x:Name="BrandIcon" Width="27" Height="27" Stretch="Uniform" Margin="0,0,9,0"/>
                     <TextBlock Text="VIBE LIST" FontWeight="Black" FontSize="15" VerticalAlignment="Center"/>
                     <Border Width="1" Height="13" Background="{DynamicResource Divider}" Margin="11,0"/>
                     <TextBlock Text="제작자 신대훈" Foreground="{DynamicResource Muted}" FontSize="10" VerticalAlignment="Center"/>
                 </StackPanel>
-                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
+                <Button x:Name="UpdateButton" Grid.Column="1" Style="{StaticResource FilterButton}" Content="↻ 확인"
+                        Background="{DynamicResource Panel}" Foreground="{DynamicResource Muted}" FontSize="9.5"
+                        Padding="5,3" Margin="7,0,5,0" VerticalAlignment="Center" ToolTip="업데이트 확인"/>
+                <TextBlock x:Name="UpdateNoticeText" Grid.Column="2" Text="확인 중..." Foreground="{DynamicResource Muted}"
+                           FontSize="9.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="업데이트 상태 확인 중"/>
+                <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center">
                     <Button x:Name="OptionsButton" Style="{StaticResource IconButton}" Content="⚙" ToolTip="옵션"/>
                     <Button x:Name="PinButton" Style="{StaticResource IconButton}" Content="◇" ToolTip="항상 위에 표시"/>
                     <Button x:Name="MinButton" Style="{StaticResource IconButton}" Content="—" ToolTip="최소화"/>
@@ -269,52 +374,33 @@ public class VibeTodo : INotifyPropertyChanged
                 <TextBlock x:Name="CountText" Grid.Row="3" Foreground="{StaticResource Muted}" FontSize="11" Margin="2,0,0,9"/>
 
                 <Grid Grid.Row="4">
-                    <ListBox x:Name="TodoList" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                <Setter Property="Padding" Value="0"/>
-                                <Setter Property="Margin" Value="0,0,0,8"/>
-                                <Setter Property="Background" Value="Transparent"/>
-                                <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
-                                <Setter Property="Template">
-                                    <Setter.Value><ControlTemplate TargetType="ListBoxItem"><ContentPresenter/></ControlTemplate></Setter.Value>
-                                </Setter>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
-                            <DataTemplate>
-                                <Border x:Name="Row" Background="{DynamicResource RowBg}" CornerRadius="14" Padding="13,11">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions><ColumnDefinition Width="34"/><ColumnDefinition/><ColumnDefinition Width="30"/><ColumnDefinition Width="30"/></Grid.ColumnDefinitions>
-                                        <CheckBox Grid.Column="0" IsChecked="{Binding Done, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                  VerticalAlignment="Center" HorizontalAlignment="Center" Width="18" Height="18" Cursor="Hand"/>
-                                        <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center" FontFamily="{DynamicResource TodoFont}"
-                                                   FontWeight="Normal" FontSize="15" TextWrapping="Wrap" Margin="7,0,8,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="{DynamicResource PrimaryText}"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding Done}" Value="True">
-                                                            <Setter Property="Foreground" Value="{DynamicResource Completed}"/>
-                                                            <Setter Property="TextDecorations" Value="Strikethrough"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                        <Button x:Name="EditTodoButton" Grid.Column="2" Content="✎" Tag="{Binding Id}" FontSize="15" Foreground="{DynamicResource Lilac}" ToolTip="수정"/>
-                                        <Button x:Name="DeleteTodoButton" Grid.Column="3" Content="×" Tag="{Binding Id}" FontSize="17" Foreground="{DynamicResource Muted}" ToolTip="삭제"/>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    <StackPanel x:Name="EmptyState" VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
-                        <TextBlock Text="✓" Foreground="{StaticResource Lilac}" FontSize="28" HorizontalAlignment="Center"/>
-                        <TextBlock Text="리스트가 깨끗합니다" FontWeight="Bold" FontSize="14" Margin="0,8,0,3"/>
-                        <TextBlock Text="새로운 할 일을 추가해 보세요." Foreground="{StaticResource Muted}" FontSize="11"/>
-                    </StackPanel>
+                    <ScrollViewer x:Name="TodoScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <Grid Margin="2,0,2,7">
+                                <TextBlock Text="🔥  지금 할 일" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="NowCountText" HorizontalAlignment="Right" Foreground="{DynamicResource Muted}" FontSize="10" VerticalAlignment="Center"/>
+                            </Grid>
+                            <ListBox x:Name="NowTodoList" Tag="now" AllowDrop="True" MinHeight="38" Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ItemContainerStyle="{StaticResource TodoListItemStyle}" ItemTemplate="{StaticResource TodoItemTemplate}"/>
+                            <TextBlock x:Name="NowEmptyText" Text="지금 할 일이 없습니다. 나중 할 일을 끌어오세요." Foreground="{DynamicResource Subtle}"
+                                       FontSize="11" Margin="12,8,0,14" Visibility="Collapsed"/>
+
+                            <Grid x:Name="LaterHeader" Margin="2,7,2,7">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="🌙  나중에 할 일" FontWeight="Bold" FontSize="13" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="LaterCountText" Foreground="{DynamicResource Muted}" FontSize="10" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Button x:Name="LaterToggleButton" Content="⌃" HorizontalAlignment="Right" Foreground="{DynamicResource Muted}"
+                                        FontSize="14" Width="28" Height="24" ToolTip="나중에 할 일 접기/펼치기"/>
+                            </Grid>
+                            <ListBox x:Name="LaterTodoList" Tag="later" AllowDrop="True" MinHeight="38" Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     ItemContainerStyle="{StaticResource TodoListItemStyle}" ItemTemplate="{StaticResource TodoItemTemplate}"/>
+                            <TextBlock x:Name="LaterEmptyText" Text="당장 하지 않아도 되는 일을 여기로 끌어놓으세요." Foreground="{DynamicResource Subtle}"
+                                       FontSize="11" Margin="12,8,0,8" Visibility="Collapsed"/>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Grid>
 
                 <Grid Grid.Row="5" Margin="2,13,2,0">
@@ -328,6 +414,7 @@ public class VibeTodo : INotifyPropertyChanged
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load($reader)
+Write-StartupTrace "window-created"
 
 if (@($script:todoFontFiles | Where-Object { Test-Path -LiteralPath (Join-Path $script:todoFontDirectory $_) }).Count -eq $script:todoFontFiles.Count) {
     try {
@@ -339,7 +426,9 @@ if (@($script:todoFontFiles | Where-Object { Test-Path -LiteralPath (Join-Path $
 
 $iconPath = [Environment]::GetEnvironmentVariable("VIBELIST_ICON_PATH")
 if ([string]::IsNullOrWhiteSpace($iconPath)) {
-    $iconPath = Join-Path $PSScriptRoot "VibeList.png"
+    $icoPath = Join-Path $PSScriptRoot "VibeList.ico"
+    $pngPath = Join-Path $PSScriptRoot "VibeList.png"
+    $iconPath = if (Test-Path -LiteralPath $icoPath) { $icoPath } else { $pngPath }
 }
 if (Test-Path -LiteralPath $iconPath) {
     try {
@@ -354,6 +443,8 @@ $appRoot = Get-Control "AppRoot"
 $titleBar = Get-Control "TitleBar"
 $brandIcon = Get-Control "BrandIcon"
 $optionsButton = Get-Control "OptionsButton"
+$updateButton = Get-Control "UpdateButton"
+$updateNoticeText = Get-Control "UpdateNoticeText"
 $pinButton = Get-Control "PinButton"
 $minButton = Get-Control "MinButton"
 $closeButton = Get-Control "CloseButton"
@@ -367,13 +458,20 @@ $activeButton = Get-Control "ActiveButton"
 $doneButton = Get-Control "DoneButton"
 $clearButton = Get-Control "ClearButton"
 $countText = Get-Control "CountText"
-$todoList = Get-Control "TodoList"
-$emptyState = Get-Control "EmptyState"
+$todoScroll = Get-Control "TodoScroll"
+$nowTodoList = Get-Control "NowTodoList"
+$laterTodoList = Get-Control "LaterTodoList"
+$nowCountText = Get-Control "NowCountText"
+$laterCountText = Get-Control "LaterCountText"
+$nowEmptyText = Get-Control "NowEmptyText"
+$laterEmptyText = Get-Control "LaterEmptyText"
+$laterToggleButton = Get-Control "LaterToggleButton"
 $statusText = Get-Control "StatusText"
 
 if ($window.Icon) {
     $brandIcon.Source = $window.Icon
 }
+Write-StartupTrace "controls-ready"
 
 $dataDir = if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
     Join-Path $env:LOCALAPPDATA "VibeList"
@@ -383,6 +481,7 @@ $dataDir = if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
 $dataFile = Join-Path $dataDir "todos.json"
 $settingsFile = Join-Path $dataDir "settings.json"
 if (-not (Test-Path $dataDir)) { New-Item -ItemType Directory -Path $dataDir -Force | Out-Null }
+Write-StartupTrace "data-directory-ready"
 
 $todos = New-Object 'System.Collections.ObjectModel.ObservableCollection[VibeTodo]'
 $script:filter = "all"
@@ -390,19 +489,51 @@ $script:editingId = $null
 $script:theme = "dark"
 $script:zoom = 1.0
 $script:lastUpdateCheck = $null
+$script:laterCollapsed = $false
+$script:draggedTodoId = $null
+$script:dragStartPoint = $null
 
-function Add-TodoObject($id, $title, $done, $createdAt) {
+function Add-TodoObject($id, $title, $done, $createdAt, $bucket = "now", $sortOrder = -1) {
     $item = New-Object VibeTodo
     $item.Id = [string]$id
     $item.Title = [string]$title
     $item.Done = [bool]$done
     $item.CreatedAt = [long]$createdAt
+    $item.Bucket = if ([string]$bucket -eq "later") { "later" } else { "now" }
+    $item.SortOrder = [int]$sortOrder
     $todos.Add($item)
+}
+
+function Get-BucketTodos([string]$bucket) {
+    return @($todos | Where-Object Bucket -eq $bucket | Sort-Object SortOrder, CreatedAt)
+}
+
+function Normalize-TodoOrder {
+    foreach ($bucket in @("now", "later")) {
+        $index = 0
+        foreach ($item in @(Get-BucketTodos $bucket)) {
+            $item.SortOrder = $index
+            $index++
+        }
+    }
+}
+
+function Get-NextSortOrder([string]$bucket) {
+    $items = @(Get-BucketTodos $bucket)
+    if ($items.Count -eq 0) { return 0 }
+    return ([int]$items[-1].SortOrder + 1)
 }
 
 function Save-Todos {
     try {
-        @($todos | ForEach-Object { [pscustomobject]@{ Id=$_.Id; Title=$_.Title; Done=$_.Done; CreatedAt=$_.CreatedAt } }) |
+        @($todos | ForEach-Object { [pscustomobject]@{
+            Id=$_.Id
+            Title=$_.Title
+            Done=$_.Done
+            CreatedAt=$_.CreatedAt
+            Bucket=$_.Bucket
+            SortOrder=$_.SortOrder
+        } }) |
             ConvertTo-Json -Depth 3 | Set-Content -Path $dataFile -Encoding UTF8
     } catch { }
 }
@@ -418,6 +549,7 @@ function Save-Settings {
             Theme=$script:theme
             Zoom=$script:zoom
             LastUpdateCheck=$script:lastUpdateCheck
+            LaterCollapsed=$script:laterCollapsed
         } |
             ConvertTo-Json | Set-Content -Path $settingsFile -Encoding UTF8
     } catch { }
@@ -484,9 +616,20 @@ function Set-Zoom([double]$zoom, [bool]$save) {
 }
 
 function Test-UpdateConfigured {
-    return (-not [string]::IsNullOrWhiteSpace($script:updateApiUrl)) -and
-        ($script:updateApiUrl -notmatch "__UPDATE_API_URL__") -and
-        ($script:updateApiUrl -match "^https://api\.github\.com/repos/[^/]+/[^/]+/releases/latest$")
+    return [bool]($script:updateApiUrl -match '^https://api\.github\.com/repos/[^/]+/[^/]+/releases/latest$')
+}
+
+function Get-ReleaseDateText($release) {
+    $rawDate = if (-not [string]::IsNullOrWhiteSpace([string]$release.published_at)) {
+        [string]$release.published_at
+    } else {
+        [string]$release.created_at
+    }
+    $releaseDate = [DateTimeOffset]::MinValue
+    if ([DateTimeOffset]::TryParse($rawDate, [ref]$releaseDate)) {
+        return $releaseDate.ToLocalTime().ToString('yyyy-MM-dd')
+    }
+    return '날짜 확인 불가'
 }
 
 function Show-AppMessage([string]$message, [string]$title, [Windows.MessageBoxImage]$icon) {
@@ -614,8 +757,13 @@ try {
     }
     if (-not $copied) { throw "업데이트 파일을 교체할 수 없습니다." }
     if ($LaunchMode -eq "Script") {
-        $args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$CurrentFile`""
-        Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden
+        $windowlessLauncher = Join-Path (Split-Path -Parent $CurrentFile) "VibeList.vbs"
+        if (Test-Path -LiteralPath $windowlessLauncher) {
+            Start-Process -FilePath "wscript.exe" -ArgumentList "`"$windowlessLauncher`""
+        } else {
+            $args = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$CurrentFile`""
+            Start-Process -FilePath "powershell.exe" -ArgumentList $args -WindowStyle Hidden
+        }
     } else {
         Start-Process -FilePath $CurrentFile
     }
@@ -632,23 +780,39 @@ try {
     $window.Close()
 }
 
-function Check-ForUpdate([bool]$manual) {
-    if (-not (Test-UpdateConfigured)) {
-        if ($manual) { Show-AppMessage "GitHub 업데이트 주소가 아직 연결되지 않았습니다." "업데이트" ([Windows.MessageBoxImage]::Information) }
-        return
-    }
+function Complete-UpdateFailure([string]$message, [bool]$manual) {
+    Write-StartupTrace "update-failed message=$message"
+    $updateNoticeText.Text = "확인 실패 · 다시 눌러주세요"
+    $updateNoticeText.ToolTip = "업데이트 확인 실패 · 다시 눌러주세요"
+    $updateNoticeText.Foreground = $window.Resources["Coral"]
+    $updateButton.Content = "↻ 확인"
+    $updateButton.IsEnabled = $true
+    $statusText.Text = "자동 저장됨"
+    if ($manual) { Show-AppMessage "업데이트를 확인하지 못했습니다.`n`n$message" "업데이트" ([Windows.MessageBoxImage]::Warning) }
+}
 
+function Complete-UpdateCheck($release, [bool]$manual, [bool]$allowInstallPrompt) {
     try {
-        $statusText.Text = "업데이트 확인 중..."
-        $release = Get-LatestRelease
         $releaseVersion = Get-ReleaseVersion $release
+        $releaseDate = Get-ReleaseDateText $release
+        Write-StartupTrace "update-release version=$releaseVersion date=$releaseDate"
         $script:lastUpdateCheck = [DateTimeOffset]::Now.ToString("o")
         Save-Settings
 
         if ($releaseVersion -le $script:appVersion) {
+            $updateNoticeText.Text = "현재 최신 · $releaseDate"
+            $updateNoticeText.ToolTip = "현재 최신 버전입니다 · 최신 배포 $releaseDate · v$releaseVersion"
+            $updateNoticeText.Foreground = $window.Resources["Muted"]
+            $updateButton.Content = "↻ 확인"
             if ($manual) { Show-AppMessage "현재 최신 버전입니다.  v$($script:appVersion)" "업데이트" ([Windows.MessageBoxImage]::Information) }
             return
         }
+
+        $updateNoticeText.Text = "업데이트 있음 · $releaseDate"
+        $updateNoticeText.ToolTip = "최신 업데이트가 있습니다 · $releaseDate · v$releaseVersion"
+        $updateNoticeText.Foreground = $window.Resources["Coral"]
+        $updateButton.Content = "↓ 받기"
+        if (-not $allowInstallPrompt) { return }
 
         $answer = [Windows.MessageBox]::Show(
             $window,
@@ -657,14 +821,70 @@ function Check-ForUpdate([bool]$manual) {
             [Windows.MessageBoxButton]::YesNo,
             [Windows.MessageBoxImage]::Information
         )
-        if ($answer -eq [Windows.MessageBoxResult]::Yes) {
-            Install-Release $release $releaseVersion
-        }
+        if ($answer -eq [Windows.MessageBoxResult]::Yes) { Install-Release $release $releaseVersion }
     } catch {
-        if ($manual) { Show-AppMessage "업데이트를 확인하지 못했습니다.`n`n$($_.Exception.Message)" "업데이트" ([Windows.MessageBoxImage]::Warning) }
+        Complete-UpdateFailure $_.Exception.Message $manual
     } finally {
+        $updateButton.IsEnabled = $true
         $statusText.Text = "자동 저장됨"
     }
+}
+
+function Check-ForUpdate([bool]$manual, [bool]$allowInstallPrompt = $true) {
+    $configured = Test-UpdateConfigured
+    Write-StartupTrace "update-check configured=$configured url=$script:updateApiUrl"
+    if (-not $configured) {
+        Complete-UpdateFailure "업데이트 주소를 확인하지 못했습니다." $manual
+        return
+    }
+    if ($script:updatePollTimer -and $script:updatePollTimer.IsEnabled) { return }
+
+    $statusText.Text = "업데이트 확인 중..."
+    $updateButton.IsEnabled = $false
+    $updateButton.Content = "확인 중"
+    $updateNoticeText.Text = "최신 버전 확인 중..."
+    $updateNoticeText.ToolTip = "GitHub에서 최신 버전을 확인하고 있습니다"
+    $updateNoticeText.Foreground = $window.Resources["Muted"]
+    $script:updateCheckManual = $manual
+    $script:updateCheckAllowPrompt = $allowInstallPrompt
+    $script:updateCheckStartedAt = [DateTimeOffset]::Now
+    $script:updateClient = New-Object Net.WebClient
+    $script:updateClient.Headers.Add("User-Agent", "VibeList/$($script:appVersion)")
+    $script:updateClient.Headers.Add("Accept", "application/vnd.github+json")
+
+    try {
+        $script:updateTask = $script:updateClient.DownloadStringTaskAsync([Uri]$script:updateApiUrl)
+    } catch {
+        $script:updateClient.Dispose()
+        Complete-UpdateFailure $_.Exception.Message $manual
+        return
+    }
+
+    $script:updatePollTimer = New-Object Windows.Threading.DispatcherTimer
+    $script:updatePollTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+    $script:updatePollTimer.Add_Tick({
+        $elapsed = ([DateTimeOffset]::Now - $script:updateCheckStartedAt).TotalSeconds
+        if (-not $script:updateTask.IsCompleted -and $elapsed -lt 12) { return }
+
+        $script:updatePollTimer.Stop()
+        if (-not $script:updateTask.IsCompleted) {
+            try { $script:updateClient.CancelAsync() } catch { }
+            $script:updateClient.Dispose()
+            Complete-UpdateFailure "GitHub 응답 시간이 초과되었습니다." $script:updateCheckManual
+            return
+        }
+
+        try {
+            $json = $script:updateTask.GetAwaiter().GetResult()
+            $release = $json | ConvertFrom-Json
+            $script:updateClient.Dispose()
+            Complete-UpdateCheck $release $script:updateCheckManual $script:updateCheckAllowPrompt
+        } catch {
+            $script:updateClient.Dispose()
+            Complete-UpdateFailure $_.Exception.Message $script:updateCheckManual
+        }
+    })
+    $script:updatePollTimer.Start()
 }
 
 function Save-WindowPreview([string]$path) {
@@ -695,8 +915,6 @@ $script:zoomMenuItem = New-Object Windows.Controls.MenuItem
 $script:zoomMenuItem.Header = "화면 크기: 100%  (Ctrl+휠)"
 $zoomResetMenuItem = New-Object Windows.Controls.MenuItem
 $zoomResetMenuItem.Header = "화면 크기 초기화"
-$updateMenuItem = New-Object Windows.Controls.MenuItem
-$updateMenuItem.Header = "업데이트 확인"
 $versionMenuItem = New-Object Windows.Controls.MenuItem
 $versionMenuItem.Header = "Vibe List  v$($script:appVersion)"
 $versionMenuItem.IsEnabled = $false
@@ -704,14 +922,13 @@ $versionMenuItem.IsEnabled = $false
 [void]$script:optionsMenu.Items.Add($script:zoomMenuItem)
 [void]$script:optionsMenu.Items.Add($zoomResetMenuItem)
 [void]$script:optionsMenu.Items.Add((New-Object Windows.Controls.Separator))
-[void]$script:optionsMenu.Items.Add($updateMenuItem)
 [void]$script:optionsMenu.Items.Add($versionMenuItem)
 $optionsButton.ContextMenu = $script:optionsMenu
 
 $script:darkThemeMenuItem.Add_Click({ Apply-Theme "dark"; Save-Settings })
 $script:lightThemeMenuItem.Add_Click({ Apply-Theme "light"; Save-Settings })
 $zoomResetMenuItem.Add_Click({ Set-Zoom 1.0 $true })
-$updateMenuItem.Add_Click({ Check-ForUpdate $true })
+$updateButton.Add_Click({ Check-ForUpdate $true $true })
 $optionsButton.Add_Click({ $script:optionsMenu.PlacementTarget = $optionsButton; $script:optionsMenu.IsOpen = $true })
 
 function Refresh-View {
@@ -720,8 +937,16 @@ function Refresh-View {
         ($script:filter -eq "active" -and -not $_.Done) -or
         ($script:filter -eq "done" -and $_.Done)
     })
-    $todoList.ItemsSource = $visible
-    $emptyState.Visibility = if ($visible.Count -eq 0) { "Visible" } else { "Collapsed" }
+    $nowVisible = @($visible | Where-Object Bucket -eq "now" | Sort-Object SortOrder, CreatedAt)
+    $laterVisible = @($visible | Where-Object Bucket -eq "later" | Sort-Object SortOrder, CreatedAt)
+    $nowTodoList.ItemsSource = $nowVisible
+    $laterTodoList.ItemsSource = $laterVisible
+    $nowCountText.Text = "$($nowVisible.Count)개"
+    $laterCountText.Text = "$($laterVisible.Count)개"
+    $nowEmptyText.Visibility = if ($nowVisible.Count -eq 0) { "Visible" } else { "Collapsed" }
+    $laterTodoList.Visibility = if ($script:laterCollapsed) { "Collapsed" } else { "Visible" }
+    $laterEmptyText.Visibility = if (-not $script:laterCollapsed -and $laterVisible.Count -eq 0) { "Visible" } else { "Collapsed" }
+    $laterToggleButton.Content = if ($script:laterCollapsed) { "⌄" } else { "⌃" }
     $doneCount = @($todos | Where-Object Done).Count
     $activeCount = $todos.Count - $doneCount
     $percent = if ($todos.Count -gt 0) { [math]::Round(($doneCount / $todos.Count) * 100) } else { 0 }
@@ -730,6 +955,44 @@ function Refresh-View {
     $countText.Text = "남은 할 일 $activeCount개  ·  완료 $doneCount개"
     $clearButton.Visibility = if ($doneCount -gt 0) { "Visible" } else { "Collapsed" }
     Set-FilterButtonState
+}
+
+function Move-Todo([string]$todoId, [string]$destinationBucket, [string]$targetId, [bool]$insertAfter) {
+    $moved = $todos | Where-Object Id -eq $todoId | Select-Object -First 1
+    if (-not $moved) { return }
+    if ($destinationBucket -notin @("now", "later")) { return }
+    if (-not [string]::IsNullOrWhiteSpace($targetId) -and $targetId -eq $todoId -and $moved.Bucket -eq $destinationBucket) { return }
+
+    $destination = New-Object 'System.Collections.Generic.List[VibeTodo]'
+    foreach ($item in @(Get-BucketTodos $destinationBucket)) {
+        if ($item.Id -ne $todoId) { $destination.Add($item) }
+    }
+
+    $insertIndex = $destination.Count
+    if (-not [string]::IsNullOrWhiteSpace($targetId)) {
+        for ($index = 0; $index -lt $destination.Count; $index++) {
+            if ($destination[$index].Id -eq $targetId) {
+                $insertIndex = $index + $(if ($insertAfter) { 1 } else { 0 })
+                break
+            }
+        }
+    }
+
+    $moved.Bucket = $destinationBucket
+    $destination.Insert($insertIndex, $moved)
+    for ($index = 0; $index -lt $destination.Count; $index++) {
+        $destination[$index].Bucket = $destinationBucket
+        $destination[$index].SortOrder = $index
+    }
+    Normalize-TodoOrder
+    Save-Todos
+    Refresh-View
+}
+
+function Get-TodoItemContainer($list, $source) {
+    if (-not $source) { return $null }
+    try { return [Windows.Controls.ItemsControl]::ContainerFromElement($list, $source) }
+    catch { return $null }
 }
 
 function Clear-EditState {
@@ -765,7 +1028,7 @@ function Add-NewTodo {
         Clear-EditState
     }
 
-    Add-TodoObject ([guid]::NewGuid().ToString()) $text $false ([DateTimeOffset]::Now.ToUnixTimeMilliseconds())
+    Add-TodoObject ([guid]::NewGuid().ToString()) $text $false ([DateTimeOffset]::Now.ToUnixTimeMilliseconds()) "now" (Get-NextSortOrder "now")
     Clear-EditState
     $script:filter = "all"
     Save-Todos
@@ -775,11 +1038,18 @@ function Add-NewTodo {
 if (Test-Path $dataFile) {
     try {
         $saved = Get-Content -Path $dataFile -Raw -Encoding UTF8 | ConvertFrom-Json
-        @($saved) | ForEach-Object { Add-TodoObject $_.Id $_.Title $_.Done $_.CreatedAt }
+        $loadIndex = 0
+        @($saved) | ForEach-Object {
+            $savedBucket = if ([string]$_.Bucket -eq "later") { "later" } else { "now" }
+            $savedOrder = if ($null -ne $_.PSObject.Properties["SortOrder"]) { [int]$_.SortOrder } else { $loadIndex }
+            Add-TodoObject $_.Id $_.Title $_.Done $_.CreatedAt $savedBucket $savedOrder
+            $loadIndex++
+        }
+        Normalize-TodoOrder
     } catch { }
 } else {
-    Add-TodoObject ([guid]::NewGuid().ToString()) "오늘 가장 중요한 일 끝내기" $false 1
-    Add-TodoObject ([guid]::NewGuid().ToString()) "내일 할 일 3개만 미리 적기" $false 2
+    Add-TodoObject ([guid]::NewGuid().ToString()) "오늘 가장 중요한 일 끝내기" $false 1 "now" 0
+    Add-TodoObject ([guid]::NewGuid().ToString()) "내일 할 일 3개만 미리 적기" $false 2 "later" 0
     Save-Todos
 }
 
@@ -796,8 +1066,12 @@ if (Test-Path $settingsFile) {
         if (-not [string]::IsNullOrWhiteSpace([string]$settings.LastUpdateCheck)) {
             $script:lastUpdateCheck = [string]$settings.LastUpdateCheck
         }
+        if ($null -ne $settings.PSObject.Properties["LaterCollapsed"]) {
+            $script:laterCollapsed = [bool]$settings.LaterCollapsed
+        }
     } catch { }
 }
+Write-StartupTrace "data-loaded"
 
 Apply-Theme $script:theme
 Set-Zoom $script:zoom $false
@@ -839,10 +1113,17 @@ $activeButton.Add_Click({ $script:filter = "active"; Refresh-View })
 $doneButton.Add_Click({ $script:filter = "done"; Refresh-View })
 $clearButton.Add_Click({
     @($todos | Where-Object Done) | ForEach-Object { [void]$todos.Remove($_) }
+    Normalize-TodoOrder
     Save-Todos
     Refresh-View
 })
-$todoList.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Windows.RoutedEventHandler]{
+$laterToggleButton.Add_Click({
+    $script:laterCollapsed = -not $script:laterCollapsed
+    Save-Settings
+    Refresh-View
+})
+
+$todoClickHandler = [Windows.RoutedEventHandler]{
     param($sender, $eventArgs)
     $source = $eventArgs.OriginalSource
     if ($source -is [Windows.Controls.CheckBox]) {
@@ -855,35 +1136,106 @@ $todoList.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, [Wind
         } elseif ($source.Name -eq "DeleteTodoButton" -and $target) {
             if ($script:editingId -eq [string]$target.Id) { Clear-EditState }
             [void]$todos.Remove($target)
+            Normalize-TodoOrder
             Save-Todos
             Refresh-View
         }
     }
-})
+}
+
+$dragMouseDownHandler = [Windows.Input.MouseButtonEventHandler]{
+    param($sender, $eventArgs)
+    $source = $eventArgs.OriginalSource
+    if ($source -is [Windows.Controls.TextBlock] -and $source.Name -eq "DragHandle" -and $source.Tag) {
+        $script:draggedTodoId = [string]$source.Tag
+        $script:dragStartPoint = $eventArgs.GetPosition($window)
+        $eventArgs.Handled = $true
+    } else {
+        $script:draggedTodoId = $null
+        $script:dragStartPoint = $null
+    }
+}
+
+$dragMouseMoveHandler = [Windows.Input.MouseEventHandler]{
+    param($sender, $eventArgs)
+    if ([string]::IsNullOrWhiteSpace($script:draggedTodoId) -or
+        $null -eq $script:dragStartPoint -or
+        $eventArgs.LeftButton -ne [Windows.Input.MouseButtonState]::Pressed) { return }
+    $point = $eventArgs.GetPosition($window)
+    if ([math]::Abs($point.X - $script:dragStartPoint.X) -lt [Windows.SystemParameters]::MinimumHorizontalDragDistance -and
+        [math]::Abs($point.Y - $script:dragStartPoint.Y) -lt [Windows.SystemParameters]::MinimumVerticalDragDistance) { return }
+    $data = New-Object Windows.DataObject
+    $data.SetData("VibeListTodoId", $script:draggedTodoId)
+    [void][Windows.DragDrop]::DoDragDrop($sender, $data, [Windows.DragDropEffects]::Move)
+    $script:draggedTodoId = $null
+    $script:dragStartPoint = $null
+}
+
+$dragOverHandler = [Windows.DragEventHandler]{
+    param($sender, $eventArgs)
+    if ($eventArgs.Data.GetDataPresent("VibeListTodoId")) {
+        $eventArgs.Effects = [Windows.DragDropEffects]::Move
+        $eventArgs.Handled = $true
+    }
+}
+
+$dropHandler = [Windows.DragEventHandler]{
+    param($sender, $eventArgs)
+    if (-not $eventArgs.Data.GetDataPresent("VibeListTodoId")) { return }
+    $todoId = [string]$eventArgs.Data.GetData("VibeListTodoId")
+    $destinationBucket = [string]$sender.Tag
+    $container = Get-TodoItemContainer $sender $eventArgs.OriginalSource
+    $targetId = $null
+    $insertAfter = $false
+    if ($container -is [Windows.Controls.ListBoxItem] -and $container.DataContext) {
+        $targetId = [string]$container.DataContext.Id
+        $insertAfter = ($eventArgs.GetPosition($container).Y -gt ($container.ActualHeight / 2))
+    }
+    Move-Todo $todoId $destinationBucket $targetId $insertAfter
+    $script:draggedTodoId = $null
+    $script:dragStartPoint = $null
+    $eventArgs.Handled = $true
+}
+
+foreach ($list in @($nowTodoList, $laterTodoList)) {
+    $list.AddHandler([Windows.Controls.Primitives.ButtonBase]::ClickEvent, $todoClickHandler)
+    $list.Add_PreviewMouseLeftButtonDown($dragMouseDownHandler)
+    $list.Add_PreviewMouseMove($dragMouseMoveHandler)
+    $list.Add_DragOver($dragOverHandler)
+    $list.Add_Drop($dropHandler)
+}
 $window.Add_Closing({ Save-Todos; Save-Settings })
+$window.Add_SourceInitialized({
+    try {
+        $windowHandle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+        if ($windowHandle -ne [IntPtr]::Zero) { [void][VibeListTaskbar]::ShowWindow($windowHandle, 5) }
+    } catch { }
+})
 $window.Add_ContentRendered({
+    Write-StartupTrace "content-rendered"
     Refresh-View
     $todoInput.Focus()
     $previewPath = [Environment]::GetEnvironmentVariable("VIBELIST_SCREENSHOT_PATH")
     if (-not [string]::IsNullOrWhiteSpace($previewPath)) { Save-WindowPreview $previewPath }
     if ($SmokeTest) {
+        Write-StartupTrace "smoke-close"
         $window.Dispatcher.BeginInvoke([Action]{ $window.Close() }) | Out-Null
     } elseif (Test-UpdateConfigured) {
-        $shouldCheck = $true
+        $script:shouldPromptForUpdate = $true
         $lastCheck = [DateTimeOffset]::MinValue
         if ([DateTimeOffset]::TryParse([string]$script:lastUpdateCheck, [ref]$lastCheck)) {
-            $shouldCheck = (([DateTimeOffset]::Now - $lastCheck).TotalHours -ge 24)
+            $script:shouldPromptForUpdate = (([DateTimeOffset]::Now - $lastCheck).TotalHours -ge 24)
         }
-        if ($shouldCheck) {
-            $script:updateTimer = New-Object Windows.Threading.DispatcherTimer
-            $script:updateTimer.Interval = [TimeSpan]::FromSeconds(2)
-            $script:updateTimer.Add_Tick({
-                $script:updateTimer.Stop()
-                Check-ForUpdate $false
-            })
-            $script:updateTimer.Start()
-        }
+        $script:updateTimer = New-Object Windows.Threading.DispatcherTimer
+        $script:updateTimer.Interval = [TimeSpan]::FromSeconds(1)
+        $script:updateTimer.Add_Tick({
+            $script:updateTimer.Stop()
+            Check-ForUpdate $false $script:shouldPromptForUpdate
+        })
+        $script:updateTimer.Start()
     }
 })
 
+Write-StartupTrace "show-dialog"
 [void]$window.ShowDialog()
+Write-StartupTrace "dialog-closed"
